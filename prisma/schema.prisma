@@ -1,0 +1,206 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum MembershipStatus {
+  PENDING
+  ACTIVE
+  REVOKED
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+model User {
+  id            String         @id @default(uuid())
+  email         String         @unique
+  passwordHash  String?        // Nullable for OAuth-only users
+  firstName     String?
+  lastName      String?
+  avatarUrl     String?
+  mfaEnabled    Boolean        @default(false)
+  mfaSecret     String?
+  lastLoginAt   DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  memberships   Membership[]
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+  invitations   Invitation[] @relation("InvitedBy")
+  apiKeys       ApiKey[]
+
+  @@map("users")
+}
+
+model Organization {
+  id            String       @id @default(uuid())
+  name          String
+  slug          String       @unique
+  quotaMembers  Int          @default(5)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  memberships   Membership[]
+  roles         Role[]
+  auditLogs     AuditLog[]
+  invitations   Invitation[]
+  apiKeys       ApiKey[]
+  samlConfig    SAMLConfig?
+  webhookConfigs WebhookConfig[]
+
+  @@map("organizations")
+}
+
+model Membership {
+  id             String           @id @default(uuid())
+  userId         String
+  organizationId String
+  roleId         String
+  status         MembershipStatus @default(ACTIVE)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role           Role             @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, organizationId])
+  @@map("memberships")
+}
+
+model Role {
+  id             String       @id @default(uuid())
+  name           String
+  description    String?
+  organizationId String
+  permissions    Permission[]
+  memberships    Membership[]
+  invitations    Invitation[]
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([name, organizationId])
+  @@map("roles")
+}
+
+model Permission {
+  id        String @id @default(uuid())
+  resource  String // e.g., "users", "organizations", "billing"
+  action    String // e.g., "read", "write", "delete", "admin"
+  scope     String @default("*") // e.g., "project_alpha", "*"
+  roleId    String
+  role      Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([resource, action, scope, roleId])
+  @@map("permissions")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  userAgent String?
+  ipAddress String?
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model AuditLog {
+  id             String       @id @default(uuid())
+  userId         String?
+  organizationId String?
+  action         String
+  resource       String
+  details        Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime     @default(now())
+  user           User?        @relation(fields: [userId], references: [id])
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
+  @@map("audit_logs")
+}
+
+model ApiKey {
+  id             String       @id @default(uuid())
+  name           String
+  keyHash        String       @unique
+  prefix         String       // e.g. "sp_live_"
+  displayKey     String       // e.g. "sp_live_...4a2b"
+  organizationId String
+  userId         String?      // Optional creator
+  scopes         String[]     // e.g. ["server:reboot", "billing:read"]
+  lastUsedAt     DateTime?
+  expiresAt      DateTime?
+  revoked        Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?        @relation(fields: [userId], references: [id])
+
+  @@index([keyHash])
+  @@map("api_keys")
+}
+
+model SAMLConfig {
+  id             String       @id @default(uuid())
+  organizationId String       @unique
+  entryPoint     String       // IdP Login URL
+  issuer         String       // IdP Entity ID
+  cert           String       @db.Text // IdP Public Certificate
+  enabled        Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("saml_configs")
+}
+
+model WebhookConfig {
+  id             String       @id @default(uuid())
+  url            String
+  secret         String       // Used to sign payloads
+  enabled        Boolean      @default(true)
+  events         String[]     // e.g. ["user.revoked", "member.invited"]
+  organizationId String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("webhook_configs")
+}
+
+model Invitation {
+  id             String           @id @default(uuid())
+  email          String
+  organizationId String
+  roleId         String
+  invitedById    String
+  token          String           @unique
+  status         InvitationStatus @default(PENDING)
+  expiresAt      DateTime
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role           Role             @relation(fields: [roleId], references: [id])
+  invitedBy      User             @relation("InvitedBy", fields: [invitedById], references: [id])
+
+  @@index([token])
+  @@index([email, organizationId])
+  @@map("invitations")
+}
