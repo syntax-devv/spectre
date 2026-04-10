@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const cacheService = require('../services/cacheService');
+const { logUtils } = require('../utils');
 
 router.get('/test-connection', async (req, res) => {
   try {
@@ -11,7 +12,7 @@ router.get('/test-connection', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    console.error('Prisma connection error:', error);
+    logUtils.logDatabaseError('connect', error);
     res.status(500).json({ 
       error: 'Failed to connect to database',
       details: error.message 
@@ -36,7 +37,7 @@ router.get('/test-redis', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    console.error('Redis connection error:', error);
+    logUtils.logError('Redis connection error', error);
     res.status(500).json({ 
       error: 'Failed to connect to Redis',
       details: error.message 
@@ -57,7 +58,7 @@ router.get('/users', async (req, res) => {
       res.json({ users });
     }
   } catch (error) {
-    console.error('Error fetching users:', error);
+    logUtils.logDatabaseError('fetch_users', error);
     res.status(500).json({ 
       error: 'Failed to fetch users',
       details: error.message 
@@ -90,7 +91,7 @@ router.post('/users', async (req, res) => {
     
     res.json({ user });
   } catch (error) {
-    console.error('Error creating user:', error);
+    logUtils.logDatabaseError('create_user', error);
     res.status(500).json({ 
       error: 'Failed to create user',
       details: error.message 
