@@ -2,8 +2,9 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const jwtUtils = require('../utils/jwt');
-const passwordUtils = require('../utils/password');
+const { passwordUtils } = require('../utils/password');
 const cacheService = require('../services/cacheService');
+const emailService = require('../services/emailService');
 const { logUtils } = require('../utils');
 
 router.post('/register', async (req, res) => {
@@ -80,7 +81,7 @@ router.post('/register', async (req, res) => {
       ...tokens
     });
   } catch (error) {
-    logUtils.logAuthError('registration', error, { email: email?.toLowerCase() });
+    logUtils.logAuthError('registration', error, { email });
     res.status(500).json({ 
       error: 'Registration failed',
       message: 'An error occurred during registration'
@@ -266,6 +267,138 @@ router.post('/logout', async (req, res) => {
   }
 });
 
+router.post('/magic-link', async (req, res) => {
+  const { email } = req.body;
+  try {
+    
+    if (!email) {
+      return res.status(400).json({ 
+        error: 'Validation failed',
+        message: 'Email is required'
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email: email.toLowerCase() }
+    });
+
+    if (!user) {
+      return res.json({
+        message: 'If an account with this email exists, you will receive a sign-in link shortly'
+      });
+    }
+
+    await prisma.magicLinkToken.deleteMany({
+      where: {
+        userId: user.id,
+        used: false,
+        expiresAt: { lt: new Date() }
+      }
+    });
+
+    const crypto = require('crypto');
+    const token = crypto.randomBytes(32).toString('hex');
+    const tokenHash = await passwordUtils.hashToken(token);
+    
+    await prisma.magicLinkToken.create({
+      data: {
+        token,
+        tokenHash,
+        userId: user.id,
+        email: email.toLowerCase(),
+        userAgent: req.get('User-Agent'),
+        ipAddress: req.ip,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000) // 15 minutes
+      }
+    });
+
+    await emailService.sendMagicLink(email, token, user.firstName);
+
+    res.json({
+      message: 'If an account with this email exists, you will receive a sign-in link shortly'
+    });
+  } catch (error) {
+    logUtils.logAuthError('magic_link_request', error, { email });
+    res.status(500).json({ 
+      error: 'Failed to send magic link',
+      message: 'An error occurred while sending the sign-in link'
+    });
+  }
+});
+
+router.post('/magic-link/verify', async (req, res) => {
+  try {
+    const { token } = req.body;
+    
+    if (!token) {
+      return res.status(400).json({ 
+        error: 'Validation failed',
+        message: 'Magic link token is required'
+      });
+    }
+
+    const magicLinkToken = await prisma.magicLinkToken.findFirst({
+      where: {
+        token,
+        used: false,
+        expiresAt: { gt: new Date() }
+      },
+      include: { user: true }
+    });
+
+    if (!magicLinkToken) {
+      return res.status(401).json({ 
+        error: 'Invalid or expired magic link',
+        message: 'This sign-in link is invalid or has expired'
+      });
+    }
+
+    await prisma.magicLinkToken.update({
+      where: { id: magicLinkToken.id },
+      data: { used: true }
+    });
+
+    await prisma.user.update({
+      where: { id: magicLinkToken.user.id },
+      data: { lastLoginAt: new Date() }
+    });
+
+    const tokens = jwtUtils.generateTokenPair({
+      userId: magicLinkToken.user.id,
+      email: magicLinkToken.user.email
+    });
+
+    const userResponse = {
+      id: magicLinkToken.user.id,
+      email: magicLinkToken.user.email,
+      firstName: magicLinkToken.user.firstName,
+      lastName: magicLinkToken.user.lastName,
+      avatarUrl: magicLinkToken.user.avatarUrl,
+      mfaEnabled: magicLinkToken.user.mfaEnabled,
+      lastLoginAt: new Date()
+    };
+
+    await cacheService.cacheUser(userResponse.id, userResponse, 300);
+
+    logUtils.logAuth('magic_link_success', magicLinkToken.user.id, {
+      email: magicLinkToken.email,
+      ipAddress: req.ip
+    });
+
+    res.json({
+      message: 'Sign-in successful',
+      user: userResponse,
+      ...tokens
+    });
+  } catch (error) {
+    logUtils.logAuthError('magic_link_verify', error);
+    res.status(500).json({ 
+      error: 'Failed to verify magic link',
+      message: 'An error occurred while verifying the sign-in link'
+    });
+  }
+});
+
 router.get('/me', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -330,6 +463,135 @@ router.get('/me', async (req, res) => {
     res.status(500).json({ 
       error: 'Failed to get user',
       message: 'An error occurred while fetching user data'
+    });
+  }
+});
+
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  try {
+    if (!email) {
+      return res.status(400).json({ 
+        error: 'Validation failed',
+        message: 'Email is required'
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email: email.toLowerCase() }
+    });
+
+    if (!user) {
+      return res.json({
+        message: 'If an account with this email exists, you will receive a password reset link shortly'
+      });
+    }
+
+    await prisma.passwordResetToken.deleteMany({
+      where: {
+        userId: user.id,
+        used: false,
+        expiresAt: { lt: new Date() }
+      }
+    });
+
+    const crypto = require('crypto');
+    const token = crypto.randomBytes(32).toString('hex');
+    const tokenHash = await passwordUtils.hashToken(token);
+    
+    await prisma.passwordResetToken.create({
+      data: {
+        token,
+        tokenHash,
+        userId: user.id,
+        email: email.toLowerCase(),
+        userAgent: req.get('User-Agent'),
+        ipAddress: req.ip,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000) // 1 hour
+      }
+    });
+
+    await emailService.sendPasswordReset(email, token, user.firstName);
+
+    res.json({
+      message: 'If an account with this email exists, you will receive a password reset link shortly'
+    });
+  } catch (error) {
+    logUtils.logAuthError('forgot_password', error, { email });
+    res.status(500).json({ 
+      error: 'Failed to send password reset',
+      message: 'An error occurred while sending the password reset link'
+    });
+  }
+});
+
+router.post('/reset-password', async (req, res) => {
+  const { token, newPassword } = req.body;
+  try {
+    if (!token || !newPassword) {
+      return res.status(400).json({ 
+        error: 'Validation failed',
+        message: 'Token and new password are required'
+      });
+    }
+
+    const resetToken = await prisma.passwordResetToken.findFirst({
+      where: {
+        token,
+        used: false,
+        expiresAt: { gt: new Date() }
+      },
+      include: { user: true }
+    });
+
+    if (!resetToken) {
+      return res.status(401).json({ 
+        error: 'Invalid or expired reset token',
+        message: 'This password reset link is invalid or has expired'
+      });
+    }
+
+    const passwordValidation = passwordUtils.validatePassword(newPassword);
+    if (!passwordValidation.isValid) {
+      return res.status(400).json({ 
+        error: 'Validation failed',
+        message: passwordValidation.errors.join(', ')
+      });
+    }
+
+    const passwordHash = await passwordUtils.hashPassword(newPassword);
+
+    await prisma.user.update({
+      where: { id: resetToken.user.id },
+      data: { 
+        passwordHash,
+        updatedAt: new Date()
+      }
+    });
+
+    await prisma.passwordResetToken.update({
+      where: { id: resetToken.id },
+      data: { used: true }
+    });
+
+    await prisma.refreshToken.updateMany({
+      where: { userId: resetToken.user.id },
+      data: { revoked: true }
+    });
+
+    logUtils.logAuth('password_reset_success', resetToken.user.id, {
+      email: resetToken.email,
+      ipAddress: req.ip
+    });
+
+    res.json({
+      message: 'Password reset successful. Please sign in with your new password.'
+    });
+  } catch (error) {
+    logUtils.logAuthError('reset_password', error);
+    res.status(500).json({ 
+      error: 'Failed to reset password',
+      message: 'An error occurred while resetting your password'
     });
   }
 });

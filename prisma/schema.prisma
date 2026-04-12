@@ -22,22 +22,24 @@ enum InvitationStatus {
 }
 
 model User {
-  id            String         @id @default(uuid())
-  email         String         @unique
-  passwordHash  String?        // Nullable for OAuth-only users
-  firstName     String?
-  lastName      String?
-  avatarUrl     String?
-  mfaEnabled    Boolean        @default(false)
-  mfaSecret     String?
-  lastLoginAt   DateTime?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  memberships   Membership[]
-  refreshTokens RefreshToken[]
-  auditLogs     AuditLog[]
-  invitations   Invitation[] @relation("InvitedBy")
-  apiKeys       ApiKey[]
+  id              String         @id @default(uuid())
+  email           String         @unique
+  passwordHash    String?        // Nullable for OAuth-only users
+  firstName       String?
+  lastName        String?
+  avatarUrl       String?
+  mfaEnabled      Boolean        @default(false)
+  mfaSecret       String?
+  lastLoginAt     DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  memberships       Membership[]
+  refreshTokens     RefreshToken[]
+  magicLinkTokens   MagicLinkToken[]
+  passwordResetTokens PasswordResetToken[]
+  auditLogs         AuditLog[]
+  invitations       Invitation[] @relation("InvitedBy")
+  apiKeys           ApiKey[]
 
   @@map("users")
 }
@@ -114,6 +116,38 @@ model RefreshToken {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("refresh_tokens")
+}
+
+model MagicLinkToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  tokenHash String   @unique
+  userId    String
+  email     String
+  userAgent String?
+  ipAddress String?
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("magic_link_tokens")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  tokenHash String   @unique
+  userId    String
+  email     String
+  userAgent String?
+  ipAddress String?
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
 }
 
 model AuditLog {

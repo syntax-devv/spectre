@@ -1,10 +1,12 @@
 const jwtUtils = require('./jwt');
-const validationUtils = require('./validation');
+const passwordUtils = require('./password');
 const { logger, logUtils } = require('./logger');
+const templateEngine = require('./templateEngine');
 
 module.exports = {
   jwt: jwtUtils,
-  validation: validationUtils,
+  password: passwordUtils,
   logger,
-  logUtils
+  logUtils,
+  templateEngine
 };
