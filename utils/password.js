@@ -55,10 +55,6 @@ class PasswordUtils {
       strength: errors.length === 0 ? 'strong' : errors.length <= 2 ? 'medium' : 'weak'
     };
   }
-
-  validatePassword(password) {
-    return this.validatePasswordStrength(password);
-  }
 }
 
 module.exports = new PasswordUtils();
