@@ -15,13 +15,20 @@ const authenticate = async (req, res, next) => {
 
     const token = authHeader.substring(7);
     const decoded = jwtUtils.verifyAccessToken(token);
+    const userId = typeof decoded === 'string' ? decoded : decoded.userId;
+    if (!userId) {
+      return res.status(401).json({
+        error: 'Invalid token',
+        message: 'The provided token payload is invalid'
+      });
+    }
     
-    const cacheKey = cacheService.cacheKey('user', decoded.userId);
+    const cacheKey = cacheService.cacheKey('user', userId);
     let user = await cacheService.get(cacheKey);
     
     if (!user) {
       user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
+        where: { id: userId },
         select: {
           id: true,
           email: true,
@@ -81,13 +88,18 @@ const optionalAuth = async (req, res, next) => {
 
     const token = authHeader.substring(7);
     const decoded = jwtUtils.verifyAccessToken(token);
+    const userId = typeof decoded === 'string' ? decoded : decoded.userId;
+    if (!userId) {
+      req.user = null;
+      return next();
+    }
     
-    const cacheKey = cacheService.cacheKey('user', decoded.userId);
+    const cacheKey = cacheService.cacheKey('user', userId);
     let user = await cacheService.get(cacheKey);
     
     if (!user) {
       user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
+        where: { id: userId },
         select: {
           id: true,
           email: true,

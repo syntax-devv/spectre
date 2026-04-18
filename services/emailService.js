@@ -7,10 +7,16 @@ const { Resend } = require('resend');
 
 class EmailService {
   constructor() {
+    this.dryRun = process.env.EMAIL_DRY_RUN === 'true';
     this.provider = process.env.EMAIL_PROVIDER || 'smtp';
+    this.outbox = [];
+
+    if (this.dryRun) {
+      return;
+    }
     
     if (this.provider === 'resend') {
-      const apiKey = process.env.SMTP_PASS;
+      const apiKey = process.env.RESEND_API_KEY || process.env.SMTP_PASS;
       if (!apiKey) {
         throw new Error('Resend API key is required');
       }
@@ -39,14 +45,26 @@ class EmailService {
     return `${baseUrl}/auth/magic-link?token=${token}`;
   }
 
-  async sendMagicLink(email, token, firstName = null) {
+  async sendMagicLink(email, tokenOrUrl, firstName = null) {
     try {
-      const magicLinkUrl = this.createMagicLinkUrl(token);
+      const magicLinkUrl = String(tokenOrUrl).startsWith('http')
+        ? tokenOrUrl
+        : this.createMagicLinkUrl(tokenOrUrl);
       
       const template = await templateEngine.render('magic-link', {
         greeting: firstName ? `Hi ${firstName},` : 'Hi there,',
         magicLinkUrl
       });
+
+      if (this.dryRun) {
+        this.outbox.push({
+          type: 'magic-link',
+          email,
+          url: magicLinkUrl,
+          createdAt: new Date().toISOString()
+        });
+        return true;
+      }
       
       if (this.provider === 'resend') {
         const { data, error } = await this.resend.emails.send({
@@ -78,14 +96,26 @@ class EmailService {
     }
   }
 
-  async sendPasswordReset(email, token, firstName = null) {
+  async sendPasswordReset(email, tokenOrUrl, firstName = null) {
     try {
-      const resetUrl = `${process.env.FRONTEND_URL}/auth/reset-password?token=${token}`;
+      const resetUrl = String(tokenOrUrl).startsWith('http')
+        ? tokenOrUrl
+        : `${process.env.FRONTEND_URL}/auth/reset-password?token=${tokenOrUrl}`;
       
       const template = await templateEngine.render('password-reset', {
         greeting: firstName ? `Hi ${firstName},` : 'Hi there,',
         resetUrl
       });
+
+      if (this.dryRun) {
+        this.outbox.push({
+          type: 'password-reset',
+          email,
+          url: resetUrl,
+          createdAt: new Date().toISOString()
+        });
+        return true;
+      }
       
       if (this.provider === 'resend') {
         const { data, error } = await this.resend.emails.send({
@@ -119,6 +149,10 @@ class EmailService {
 
   async verifyConnection() {
     try {
+      if (this.dryRun) {
+        return true;
+      }
+
       if (this.provider === 'resend') {
         return true;
       } else {
@@ -129,6 +163,14 @@ class EmailService {
       logUtils.logError('Email service connection failed', error);
       return false;
     }
+  }
+
+  getOutbox() {
+    return [...this.outbox];
+  }
+
+  clearOutbox() {
+    this.outbox = [];
   }
 }
 

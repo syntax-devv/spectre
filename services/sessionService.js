@@ -1,11 +1,11 @@
-const { cacheService } = require('./cacheService');
+const cacheService = require('./cacheService');
 const { logUtils } = require('../utils');
 
 class SessionService {
   constructor() {
     this.sessionPrefix = 'session:';
     this.userSessionsPrefix = 'user_sessions:';
-    this.defaultTTL = 30 * 60; 
+    this.defaultTTL = 30 * 60 * 1000;
   }
 
   generateSessionId() {
@@ -15,6 +15,7 @@ class SessionService {
 
   async createSession(userId, sessionData = {}, ttl = this.defaultTTL) {
     try {
+      const ttlMs = typeof ttl === 'number' && ttl > 0 ? ttl : this.defaultTTL;
       const sessionId = this.generateSessionId();
       const sessionKey = this.sessionPrefix + sessionId;
       const userSessionsKey = this.userSessionsPrefix + userId;
@@ -24,13 +25,15 @@ class SessionService {
         userId,
         ...sessionData,
         createdAt: new Date().toISOString(),
-        lastActivity: new Date().toISOString()
+        lastActivity: new Date().toISOString(),
+        ttlMs,
+        expiresAt: new Date(Date.now() + ttlMs).toISOString()
       };
 
-      await cacheService.set(sessionKey, session, ttl);
+      await cacheService.set(sessionKey, session, ttlMs);
 
       await cacheService.sadd(userSessionsKey, sessionId);
-      await cacheService.expire(userSessionsKey, ttl);
+      await cacheService.expire(userSessionsKey, ttlMs);
 
       logUtils.logAuth('session_created', userId, { sessionId });
       
@@ -50,8 +53,10 @@ class SessionService {
       const session = await cacheService.get(sessionKey);
 
       if (session) {
+        const ttlMs = session.ttlMs || this.defaultTTL;
         session.lastActivity = new Date().toISOString();
-        await cacheService.set(sessionKey, session, this.defaultTTL);
+        session.expiresAt = new Date(Date.now() + ttlMs).toISOString();
+        await cacheService.set(sessionKey, session, ttlMs);
         
         logUtils.logAuth('session_accessed', session.userId, { sessionId });
         return session;
@@ -79,7 +84,9 @@ class SessionService {
         lastActivity: new Date().toISOString()
       };
 
-      await cacheService.set(sessionKey, updatedSession, this.defaultTTL);
+      const ttlMs = updatedSession.ttlMs || this.defaultTTL;
+      updatedSession.expiresAt = new Date(Date.now() + ttlMs).toISOString();
+      await cacheService.set(sessionKey, updatedSession, ttlMs);
       
       logUtils.logAuth('session_updated', session.userId, { sessionId });
       
@@ -136,7 +143,7 @@ class SessionService {
 
       logUtils.logAuth('all_user_sessions_destroyed', userId, { 
         destroyedCount,
-        excludedSessionId 
+        excludeSessionId
       });
 
       return destroyedCount;

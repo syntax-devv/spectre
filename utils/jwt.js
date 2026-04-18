@@ -26,25 +26,17 @@ class JWTUtils {
   }
 
   verifyAccessToken(token) {
-    try {
-      return jwt.verify(token, this.accessTokenSecret, {
-        issuer: 'spectre-iam',
-        audience: 'spectre-users'
-      });
-    } catch (error) {
-      throw new Error(`Invalid access token: ${error.message}`);
-    }
+    return jwt.verify(token, this.accessTokenSecret, {
+      issuer: 'spectre-iam',
+      audience: 'spectre-users'
+    });
   }
 
   verifyRefreshToken(token) {
-    try {
-      return jwt.verify(token, this.refreshTokenSecret, {
-        issuer: 'spectre-iam',
-        audience: 'spectre-users'
-      });
-    } catch (error) {
-      throw new Error(`Invalid refresh token: ${error.message}`);
-    }
+    return jwt.verify(token, this.refreshTokenSecret, {
+      issuer: 'spectre-iam',
+      audience: 'spectre-users'
+    });
   }
 
   decodeToken(token) {

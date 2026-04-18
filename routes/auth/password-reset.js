@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../../lib/prisma');
-const { passwordUtils } = require('../../utils/password');
+const passwordUtils = require('../../utils/password');
 const emailService = require('../../services/emailService');
 const { logUtils } = require('../../utils');
 
@@ -31,6 +31,7 @@ router.post('/forgot-password', async (req, res) => {
     
     await prisma.passwordResetToken.create({
       data: {
+        token: tokenHash,
         tokenHash,
         userId: user.id,
         email: email.toLowerCase(),
@@ -38,8 +39,7 @@ router.post('/forgot-password', async (req, res) => {
       }
     });
 
-    const resetLink = `${process.env.FRONTEND_URL}/auth/reset-password?token=${token}&email=${encodeURIComponent(email)}`;
-    await emailService.sendPasswordReset(email, resetLink);
+    await emailService.sendPasswordReset(email, token);
 
     logUtils.logAuth('password_reset_sent', user.id, { 
       email: email.toLowerCase(),

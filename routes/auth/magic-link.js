@@ -2,9 +2,27 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../../lib/prisma');
 const jwtUtils = require('../../utils/jwt');
-const { passwordUtils } = require('../../utils/password');
+const passwordUtils = require('../../utils/password');
 const emailService = require('../../services/emailService');
 const { logUtils } = require('../../utils');
+
+const persistRefreshToken = async (refreshToken, userId, req) => {
+  const tokenHash = await passwordUtils.hashToken(refreshToken);
+  const decoded = jwtUtils.decodeToken(refreshToken);
+  const expiresAt = decoded?.exp
+    ? new Date(decoded.exp * 1000)
+    : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  await prisma.refreshToken.create({
+    data: {
+      tokenHash,
+      userId,
+      userAgent: req.get('User-Agent') || null,
+      ipAddress: req.ip,
+      expiresAt
+    }
+  });
+};
 
 router.post('/magic-link', async (req, res) => {
   const { email } = req.body;
@@ -33,6 +51,7 @@ router.post('/magic-link', async (req, res) => {
 
     await prisma.magicLinkToken.create({
       data: {
+        token: tokenHash,
         tokenHash,
         userId: user.id,
         email: email.toLowerCase(),
@@ -40,8 +59,7 @@ router.post('/magic-link', async (req, res) => {
       }
     });
 
-    const magicLink = `${process.env.FRONTEND_URL}/auth/magic-link?token=${token}&email=${encodeURIComponent(email)}`;
-    await emailService.sendMagicLink(email, magicLink);
+    await emailService.sendMagicLink(email, token);
 
     logUtils.logAuth('magic_link_sent', user.id, { 
       email: email.toLowerCase(),
@@ -109,7 +127,8 @@ router.post('/magic-link/verify', async (req, res) => {
       data: { lastLoginAt: new Date() }
     });
 
-    const tokens = jwtUtils.generateTokenPair(magicLinkToken.user.id);
+    const tokens = jwtUtils.generateTokenPair({ userId: magicLinkToken.user.id });
+    await persistRefreshToken(tokens.refreshToken, magicLinkToken.user.id, req);
 
     const userResponse = {
       id: magicLinkToken.user.id,

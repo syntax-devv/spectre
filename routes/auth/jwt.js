@@ -2,9 +2,26 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../../lib/prisma');
 const jwtUtils = require('../../utils/jwt');
-const { passwordUtils } = require('../../utils/password');
-const emailService = require('../../services/emailService');
+const passwordUtils = require('../../utils/password');
 const { logUtils } = require('../../utils');
+
+const persistRefreshToken = async (refreshToken, userId, req) => {
+  const tokenHash = await passwordUtils.hashToken(refreshToken);
+  const decoded = jwtUtils.decodeToken(refreshToken);
+  const expiresAt = decoded?.exp
+    ? new Date(decoded.exp * 1000)
+    : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  await prisma.refreshToken.create({
+    data: {
+      tokenHash,
+      userId,
+      userAgent: req.get('User-Agent') || null,
+      ipAddress: req.ip,
+      expiresAt
+    }
+  });
+};
 
 router.post('/register', async (req, res) => {
   const { email, password, firstName, lastName } = req.body;
@@ -97,7 +114,8 @@ router.post('/login', async (req, res) => {
       data: { lastLoginAt: new Date() }
     });
 
-    const tokens = jwtUtils.generateTokenPair(user.id);
+    const tokens = jwtUtils.generateTokenPair({ userId: user.id });
+    await persistRefreshToken(tokens.refreshToken, user.id, req);
 
     const userResponse = {
       id: user.id,
@@ -137,26 +155,34 @@ router.post('/refresh', async (req, res) => {
     }
 
     const decoded = jwtUtils.verifyRefreshToken(refreshToken);
+    const userId = typeof decoded === 'string' ? decoded : decoded.userId;
+    if (!userId) {
+      return res.status(401).json({
+        error: 'Invalid token',
+        message: 'Refresh token payload is invalid'
+      });
+    }
     
     const storedToken = await prisma.refreshToken.findUnique({
       where: { tokenHash: await passwordUtils.hashToken(refreshToken) }
     });
 
-    if (!storedToken || storedToken.userId !== decoded.userId) {
+    if (!storedToken || storedToken.userId !== userId) {
       return res.status(401).json({ 
         error: 'Invalid token',
         message: 'Refresh token is invalid or expired'
       });
     }
 
-    const newTokens = jwtUtils.generateTokenPair(decoded.userId);
+    const newTokens = jwtUtils.generateTokenPair({ userId });
 
     // Remove old refresh token
     await prisma.refreshToken.delete({
       where: { id: storedToken.id }
     });
+    await persistRefreshToken(newTokens.refreshToken, userId, req);
 
-    logUtils.logAuth('token_refreshed', decoded.userId);
+    logUtils.logAuth('token_refreshed', userId);
 
     res.json({
       message: 'Token refreshed successfully',

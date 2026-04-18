@@ -15,11 +15,17 @@ class PasswordUtils {
   }
 
   async hashToken(token) {
-    return await bcrypt.hash(token, this.saltRounds);
+    return crypto.createHash('sha256').update(token).digest('hex');
   }
 
   async compareToken(token, hashedToken) {
-    return await bcrypt.compare(token, hashedToken);
+    const computed = await this.hashToken(token);
+    const left = Buffer.from(computed, 'utf8');
+    const right = Buffer.from(hashedToken || '', 'utf8');
+    if (left.length !== right.length) {
+      return false;
+    }
+    return crypto.timingSafeEqual(left, right);
   }
 
   generateSecurePassword(length = 16) {
@@ -54,6 +60,10 @@ class PasswordUtils {
       errors,
       strength: errors.length === 0 ? 'strong' : errors.length <= 2 ? 'medium' : 'weak'
     };
+  }
+
+  validatePassword(password) {
+    return this.validatePasswordStrength(password);
   }
 }
 

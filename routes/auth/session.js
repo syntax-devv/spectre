@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../../lib/prisma');
-const { passwordUtils } = require('../../utils/password');
+const passwordUtils = require('../../utils/password');
 const { sessionService, createSessionCookie, destroySessionCookie } = require('../../middleware/session');
 const { logUtils } = require('../../utils');
 
@@ -37,7 +37,9 @@ router.post('/session-login', async (req, res) => {
       mfaEnabled: user.mfaEnabled
     }, ttl);
 
-    createSessionCookie(res, sessionId, rememberMe);
+    createSessionCookie(res, sessionId, {
+      maxAge: ttl
+    });
 
     await prisma.user.update({
       where: { id: user.id },
